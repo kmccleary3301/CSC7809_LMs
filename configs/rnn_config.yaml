@@ -1,0 +1,20 @@
+# RNN model configuration
+model_type: rnn
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+# Model architecture
+embedding_dim: 256
+hidden_dim: 512
+num_layers: 2
+dropout: 0.3
+
+# Training parameters
+lr: 0.001
+weight_decay: 1e-5
+epochs: 30
+patience: 3
+batch_size: 64
+
+# File management
+save_dir: project_results/rnn 

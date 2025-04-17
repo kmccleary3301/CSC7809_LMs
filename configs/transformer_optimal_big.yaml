@@ -1,0 +1,32 @@
+# Transformer model configuration
+model_type: transformer
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+# Model architecture
+embedding_dim: 128
+hidden_dim: 512
+num_layers: 10
+num_heads: 128
+dropout: 0.22883193769053484
+
+# Training parameters
+lr: 0.0004626298210339575
+weight_decay: 0.0002432331565681579
+epochs: 50
+patience: 10
+
+seq_length: 64
+batch_size: 16
+
+
+train_dataset:
+  max_samples: 39592 # Total set is 39592
+
+val_dataset:
+  max_samples: 9899 # Total set is 9899
+
+device: "cuda:1"
+
+# File management
+save_dir: project_results/transformer 

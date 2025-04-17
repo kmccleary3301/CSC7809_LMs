@@ -1,0 +1,59 @@
+# RNN model configuration
+model_type: lstm
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+epochs: 1
+patience: 10
+
+seq_length: 512
+# batch_size: 128
+
+train_dataset:
+  max_samples: 10000 # Total set is 39592
+
+val_dataset:
+  max_samples: 5000 # Total set is 9899
+
+checkpoint_path: "models"
+
+device: "cuda:1"
+
+# Sweep parameters, following wandb sweep config specs.
+# See: https://docs.wandb.ai/guides/sweeps/configuration
+sweep:
+  method: bayes
+  metric:
+    goal: minimize
+    name: test/loss
+  parameters:
+    weight_decay:
+      min: 0.000005
+      max: 0.0005
+    lr:
+      min: 0.000005
+      max: 0.0005
+    num_layers:
+      values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    dropout:
+      min: 0.02
+      max: 0.5
+    batch_size:
+      values: [16, 32, 48, 64, 80, 96, 112, 128]
+    hidden_dim:
+      values: [128, 256, 384, 512, 640, 768, 896, 1024]
+    embedding_dim:
+      values: [128, 256, 384, 512, 640, 768, 896, 1024]
+  
+  
+  early_terminate:
+    type: hyperband
+    s: 50
+    eta: 50
+    max_iter: 100
+  
+  total_runs: 100
+
+
+# File management
+save_dir: project_results/lstm

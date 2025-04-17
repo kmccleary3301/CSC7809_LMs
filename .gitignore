@@ -1,0 +1,13 @@
+models/
+data/
+results/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+__pycache__/
+project_results/
+wandb/
+plots/
+generated_texts/
+architecture_diagrams/
