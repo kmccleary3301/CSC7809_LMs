@@ -16,7 +16,7 @@ weight_decay: 0.0002432331565681579
 epochs: 50
 patience: 10
 
-seq_length: 64
+max_seq_length: 64
 batch_size: 16
 
 

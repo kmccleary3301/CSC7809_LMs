@@ -32,49 +32,43 @@ from wandb.sdk.wandb_run import Run
 from collections import deque
 
 from models import RNNModel, LSTMModel, TransformerModel
-from tokenizer import TextDataset, TextTokenizer, tokenize_dataset, get_base_dir
+from tokenizer import TextDataset, TextTokenizer, tokenize_dataset, get_base_dir, prepare_data_for_training
 from wandb_manager import WandbTrainingManager
 
 
 class TextGenerationDataset(Dataset):
-    def __init__(self, tokenized_texts, seq_length=64):
-        self.tokenized_texts = tokenized_texts
-        self.seq_length = seq_length
-        
-        # Create input-output pairs for language modeling
+    def __init__(self, tokenized_texts, max_seq_length=64):
+        """Initialize with pre-tokenized and padded/truncated sequences."""
         self.input_sequences = []
         self.target_sequences = []
-        
-        for tokens in self.tokenized_texts:
-            if len(tokens) <= 1:  # Skip texts that are too short
-                continue
-            
-            # Create overlapping sequences
-            for i in range(0, len(tokens) - 1, seq_length // 2):
-                if i + seq_length + 1 > len(tokens):
-                    # Add the last sequence if it's not long enough
-                    if len(tokens) > seq_length:
-                        input_seq = tokens[:seq_length]
-                        target_seq = tokens[1:seq_length + 1]
-                        self.input_sequences.append(input_seq)
-                        self.target_sequences.append(target_seq)
-                    break
-                
-                input_seq = tokens[i:i + seq_length]
-                target_seq = tokens[i + 1:i + seq_length + 1]
-                self.input_sequences.append(input_seq)
+        pad_id = 0 # Assuming pad_id is 0 based on tokenizer.py
+
+        for tokens in tokenized_texts:
+            # Ensure the tensor has the expected length (already handled by tokenize_dataset)
+            if len(tokens) == max_seq_length:
+                # Input is the sequence itself
+                self.input_sequences.append(tokens)
+                # Target is the sequence shifted left by one, padded at the end
+                target_seq = torch.cat((tokens[1:], torch.tensor([pad_id], dtype=torch.long)))
                 self.target_sequences.append(target_seq)
-    
+            # else: # Optional: Add a warning or skip if length mismatches, though tokenize_dataset should prevent this.
+            #     print(f"Warning: Skipping sequence with unexpected length {len(tokens)}. Expected {max_seq_length}.")
+
     def __len__(self):
         return len(self.input_sequences)
     
     def __getitem__(self, idx):
+        # Return tensors directly
         return self.input_sequences[idx], self.target_sequences[idx]
 
 
 def collate_batch(batch):
+    # This function might become redundant if padding is fully handled in the Dataset
+    # Keeping it for now, but it might need adjustment or removal depending on final Dataset output.
+    # If Dataset.__getitem__ returns tensors, default collate should work.
+    # If we keep it, it should handle already padded tensors.
     inputs, targets = zip(*batch)
-    inputs = torch.stack(inputs)
+    inputs = torch.stack(inputs) # Stacks list of tensors [B, L] -> [B, L]
     targets = torch.stack(targets)
     return inputs, targets
 
@@ -142,7 +136,7 @@ class Pretrainer:
         self.patience = self.config.get('patience', 3)
         self.use_amp = self.config.get('use_amp', False)
         self.gradient_accumulation_steps = self.config.get('gradient_accumulation_steps', 1)
-        self.moving_average_window_size = self.config.get('moving_average_window_size', 100)
+        self.moving_average_window_size = self.config.get('moving_average_window_size', 1)
         self.log_interval = self.config.get('log_interval', 10)
         
         # File management
@@ -169,18 +163,18 @@ class Pretrainer:
         print(f"Val dataset size: {len(self.val_dataset)}")
         
         # Tokenize datasets
-        self.train_tokenized = tokenize_dataset(self.train_dataset, self.tokenizer)
-        self.val_tokenized = tokenize_dataset(self.val_dataset, self.tokenizer)
+        self.max_seq_length = self.config.get('max_seq_length', 512) # Defaulting to 512 based on user req
+        self.train_tokenized = tokenize_dataset(self.train_dataset, self.tokenizer, max_length=self.max_seq_length)
+        self.val_tokenized = tokenize_dataset(self.val_dataset, self.tokenizer, max_length=self.max_seq_length)
         
         # Create data loaders
-        self.seq_length = self.config.get('seq_length', 64)  # Sequence length for training
         self.batch_size = self.config.get('batch_size', 128)  # Batch size as recommended
         
-        self.train_data = TextGenerationDataset(self.train_tokenized, self.seq_length)
-        self.val_data = TextGenerationDataset(self.val_tokenized, self.seq_length)
+        self.train_data = TextGenerationDataset(self.train_tokenized, self.max_seq_length)
+        self.val_data = TextGenerationDataset(self.val_tokenized, self.max_seq_length)
         
-        self.train_loader = DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, collate_fn=collate_batch)
-        self.val_loader = DataLoader(self.val_data, batch_size=self.batch_size, collate_fn=collate_batch)    
+        self.train_loader = DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True)
+        self.val_loader = DataLoader(self.val_data, batch_size=self.batch_size)
         
         # Create directories if they don't exist
         os.makedirs(self.models_dir, exist_ok=True)
@@ -263,7 +257,9 @@ class Pretrainer:
         test_loader = self.val_loader
         
         # Loss function and optimizer
-        criterion = nn.CrossEntropyLoss()
+        # Use ignore_index to handle padding tokens directly
+        pad_id = self.tokenizer.pad_id if hasattr(self, 'tokenizer') and hasattr(self.tokenizer, 'pad_id') else 0
+        criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
         optimizer = optim.AdamW(
             self.model.parameters(), 
             lr=self.lr, 
@@ -346,9 +342,6 @@ class Pretrainer:
                 # Move tensors to GPU
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 
-                # Initialize attention mask (all ones for non-padded tokens)
-                attention_mask = torch.ones_like(targets, dtype=torch.bool)
-                
                 # Forward pass timing
                 forward_start_time = time.time()
                 
@@ -367,24 +360,20 @@ class Pretrainer:
                         # Reshape outputs and targets for loss calculation
                         outputs_flat = outputs.reshape(-1, outputs.shape[-1])
                         targets_flat = targets.reshape(-1)
-                        mask_flat = attention_mask.reshape(-1)
                         
-                        # Compute loss on non-padding tokens only
-                        active_loss = mask_flat.bool()
-                        active_logits = outputs_flat[active_loss]
-                        active_targets = targets_flat[active_loss]
-                        
-                        # Calculate loss
-                        loss = criterion(active_logits, active_targets)
+                        # Compute loss on non-padding tokens only (handled by ignore_index)
+                        loss = criterion(outputs_flat, targets_flat)
                         scaled_loss = loss / self.gradient_accumulation_steps
                         
-                        # Calculate accuracy
+                        # Calculate accuracy (excluding padding)
                         with torch.no_grad():
-                            pred_tokens = torch.argmax(active_logits, dim=1)
-                            correct = (pred_tokens == active_targets).sum().item()
-                            total = active_targets.numel()
-                            correct_predictions += correct
-                            total_tokens += total
+                            active_targets_mask = targets_flat != pad_id
+                            pred_tokens = torch.argmax(outputs_flat[active_targets_mask], dim=1)
+                            correct = (pred_tokens == targets_flat[active_targets_mask]).sum().item()
+                            total = active_targets_mask.sum().item() # Count only non-pad tokens
+                            if total > 0: # Avoid division by zero if batch has only padding
+                                correct_predictions += correct
+                                total_tokens += total
                 else:
                     # Initialize hidden state for RNN/LSTM for each batch
                     hidden = None
@@ -398,24 +387,20 @@ class Pretrainer:
                     # Reshape outputs and targets for loss calculation
                     outputs_flat = outputs.reshape(-1, outputs.shape[-1])
                     targets_flat = targets.reshape(-1)
-                    mask_flat = attention_mask.reshape(-1)
                     
-                    # Compute loss on non-padding tokens only
-                    active_loss = mask_flat.bool()
-                    active_logits = outputs_flat[active_loss]
-                    active_targets = targets_flat[active_loss]
-                    
-                    # Calculate loss
-                    loss = criterion(active_logits, active_targets)
+                    # Compute loss on non-padding tokens only (handled by ignore_index)
+                    loss = criterion(outputs_flat, targets_flat)
                     scaled_loss = loss / self.gradient_accumulation_steps
                     
-                    # Calculate accuracy
+                    # Calculate accuracy (excluding padding)
                     with torch.no_grad():
-                        pred_tokens = torch.argmax(active_logits, dim=1)
-                        correct = (pred_tokens == active_targets).sum().item()
-                        total = active_targets.numel()
-                        correct_predictions += correct
-                        total_tokens += total
+                        active_targets_mask = targets_flat != pad_id
+                        pred_tokens = torch.argmax(outputs_flat[active_targets_mask], dim=1)
+                        correct = (pred_tokens == targets_flat[active_targets_mask]).sum().item()
+                        total = active_targets_mask.sum().item() # Count only non-pad tokens
+                        if total > 0: # Avoid division by zero
+                            correct_predictions += correct
+                            total_tokens += total
                 
                 # Record forward pass time
                 forward_time = time.time() - forward_start_time
@@ -508,23 +493,19 @@ class Pretrainer:
                             val_targets_flat = val_targets.reshape(-1)
                             val_mask_flat = val_attention_mask.reshape(-1)
                             
-                            # Compute loss on non-padding tokens only
-                            val_active_loss = val_mask_flat.bool()
-                            val_active_logits = val_outputs_flat[val_active_loss]
-                            val_active_targets = val_targets_flat[val_active_loss]
+                            # Compute loss on non-padding tokens only (handled by ignore_index)
+                            val_loss = criterion(val_outputs_flat, val_targets_flat)
                             
-                            if val_active_targets.numel() > 0:
-                                # Calculate loss
-                                val_loss = criterion(val_active_logits, val_active_targets)
-                                
-                                # Calculate accuracy
-                                val_pred_tokens = torch.argmax(val_active_logits, dim=1)
-                                val_correct = (val_pred_tokens == val_active_targets).sum().item()
-                                
+                            # Calculate accuracy (excluding padding)
+                            val_active_targets_mask = val_targets_flat != pad_id
+                            val_pred_tokens = torch.argmax(val_outputs_flat[val_active_targets_mask], dim=1)
+                            val_correct = (val_pred_tokens == val_targets_flat[val_active_targets_mask]).sum().item()
+                            
+                            if val_active_targets_mask.sum().item() > 0:
                                 # Update metrics
-                                epoch_val_loss += val_loss.item() * val_active_targets.numel()
+                                epoch_val_loss += val_loss.item() * val_active_targets_mask.sum().item()
                                 epoch_val_correct += val_correct
-                                epoch_val_tokens += val_active_targets.numel()
+                                epoch_val_tokens += val_active_targets_mask.sum().item()
                     
                     self.model.train()
                     
@@ -877,6 +858,16 @@ class Pretrainer:
 
 
 def main():
+    # Ensure tokenizer is prepared before starting training/sweeps
+    print("Preparing tokenizer...")
+    try:
+        tokenizer = prepare_data_for_training()
+        print(f"Tokenizer prepared successfully. Vocab size: {tokenizer.get_vocab_size()}")
+    except Exception as e:
+        print(f"Error preparing tokenizer: {e}")
+        print("Please ensure the data files exist and tokenizer training can complete.")
+        return # Exit if tokenizer preparation fails
+
     parser = argparse.ArgumentParser(description="Train a Language Model")
     parser.add_argument(
         "--config",

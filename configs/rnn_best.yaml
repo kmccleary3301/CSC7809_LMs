@@ -1,0 +1,25 @@
+
+
+# RNN model configuration
+model_type: rnn
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+# Model architecture
+# These parameters are optimal for test loss.
+# They were revealed to me in a dream (wandb hyperparam sweep)
+embedding_dim: 896
+hidden_dim: 1024
+num_layers: 1
+dropout: 0.47331281656627017
+
+# Training parameters
+lr: 0.0004996186884326162
+weight_decay: 0.0000974137093906146
+epochs: 30
+patience: 3
+batch_size: 16
+max_seq_length: 512
+
+# File management
+save_dir: project_results/rnn_best 

@@ -17,7 +17,7 @@ epochs: 50
 patience: 5
 batch_size: 16
 
-seq_length: 64
+max_seq_length: 64
 batch_size: 128
 
 

@@ -1,162 +1,197 @@
-# Sequential Neural Networks for Text Generation
+# CSC 7700 / 4700 — Foundational AI: Project 2 Report
 
-## Abstract
+**Author:** Kyle McCleary
 
-In this project, we implemented and compared three different sequential neural network architectures for text generation: Recurrent Neural Networks (RNN), Long Short-Term Memory networks (LSTM), and Transformer models. We trained these models on a text corpus from Project Gutenberg using a BPE tokenizer with a vocabulary size of 10,000. We evaluated the models using perplexity and BLEU scores, and compared their text generation capabilities. The results demonstrated the trade-offs between these architectures, with transformers showing superior performance but requiring more computational resources, while LSTMs provided a good balance between performance and efficiency compared to vanilla RNNs.
+## 1. Abstract
 
-## Methodology
+This project involved implementing, training, and evaluating three sequential deep-learning models: a vanilla Recurrent Neural Network (RNN), a Long Short-Term Memory (LSTM) network, and a Transformer model. The goal was to compare their performance on a small-scale language generation task using the Project Gutenberg dataset. Models were implemented in PyTorch, utilizing standard modules like `torch.nn.RNN`, `torch.nn.LSTM`, and components for the Transformer. A Byte Pair Encoding (BPE) tokenizer (SentencePiece) with a 10,000-token vocabulary was trained on the dataset. Hyperparameter optimization was performed using Weights & Biases sweeps. Evaluation metrics included Perplexity (PPL) and BLEU score on a held-out test set, alongside qualitative assessment of generated text. The LSTM model achieved the lowest perplexity (80.88) and loss (4.3930), while the Transformer achieved the highest BLEU score (0.0678), indicating a trade-off between predictive accuracy and generation quality resemblance to the test set.
 
-### Data Preparation
+## 2. Methodology
 
-We used a dataset derived from Project Gutenberg, consisting of short text sequences from public domain literature. The data was split into training and testing sets. Before model training, we implemented a subword tokenization approach using the SentencePiece library to create a BPE tokenizer with a vocabulary size of 10,000.
+The project followed the specifications outlined in the assignment rubric, focusing on creating comparable implementations of RNN, LSTM, and Transformer architectures for text generation.
 
-The tokenization process involved:
-1. Extracting text from the JSONL dataset files
-2. Training a BPE tokenizer on the training data
-3. Tokenizing the text into subword units
-4. Creating input-target pairs for language modeling
+### Dataset and Tokenization
 
-For the language modeling task, we generated overlapping sequences of fixed length (64 tokens) from the tokenized texts, where each input sequence was paired with a target sequence shifted by one token.
+The dataset consists of short text sequences extracted from Project Gutenberg literature. Following the assignment requirements, a SentencePiece BPE tokenizer was trained on the provided `train.jsonl` data using the implementation in `tokenizer.py`.
+
+```python
+# From tokenizer.py - Training Arguments
+train_args = [
+    f'--input={input_file}',
+    f'--model_prefix={model_prefix}',
+    f'--vocab_size=10000',
+    f'--model_type=bpe',
+    f'--character_coverage=1.0',
+    '--pad_id=0', # Explicitly define pad token ID
+    '--unk_id=1',
+    '--bos_id=2',
+    '--eos_id=3',
+    '--pad_piece=[PAD]',
+    '--unk_piece=[UNK]',
+    '--bos_piece=[BOS]',
+    '--eos_piece=[EOS]',
+]
+spm.SentencePieceTrainer.train(' '.join(train_args))
+```
+
+The tokenizer uses a vocabulary size ($V$) of 10,000 and includes special tokens `[PAD]`, `[UNK]`, `[BOS]`, `[EOS]`. The `tokenize_dataset` function was modified to enforce a maximum sequence length (`max_seq_length`) of 512 by truncating longer sequences and padding shorter sequences with the `[PAD]` token (ID 0). This ensures consistent input dimensions for the models.
 
 ### Model Architectures
 
-We implemented three different sequential neural network architectures for text generation:
+All models were implemented in PyTorch, inheriting from `torch.nn.Module`, and share common components:
 
-#### Recurrent Neural Network (RNN)
+1.  **Embedding Layer:** `torch.nn.Embedding` maps input token IDs to dense vectors of dimension `embedding_dim`.
+2.  **Output Layer:** A final `torch.nn.Linear` layer maps the hidden states to logits over the vocabulary size ($V$).
 
-![RNN Architecture](./architecture_diagrams/rnn_architecture.png)
+The core differences lie in the hidden layers processing the sequential information:
 
-The RNN model consisted of:
-- An embedding layer mapping token IDs to embeddings (dim=256)
-- Two RNN layers with hidden size of 512
-- A fully connected output layer mapping hidden states to token probabilities
-- Dropout of 0.5 between layers
+*   **RNN (`models.RNNModel`):**
+    *   Uses one or more `torch.nn.RNN` layers with `hidden_dim` units.
+    *   Includes dropout between layers.
+    *   *Architecture Diagram Placeholder*
 
-RNNs process text sequentially, maintaining a hidden state that is updated at each time step. However, they suffer from the vanishing gradient problem, making it difficult to capture long-range dependencies.
+*   **LSTM (`models.LSTMModel`):**
+    *   Uses one or more `torch.nn.LSTM` layers with `hidden_dim` units.
+    *   Includes dropout between layers.
+    *   *Architecture Diagram Placeholder*
 
-#### Long Short-Term Memory (LSTM)
+*   **Transformer (`models.TransformerModel`):**
+    *   Uses a stack of Transformer encoder layers (`torch.nn.TransformerEncoderLayer`).
+    *   Each layer contains multi-head self-attention (MHA) and a feed-forward network (FFN).
+    *   Requires positional encoding added to the input embeddings.
+    *   `num_heads` specifies the number of attention heads (must be $\ge 2$).
+    *   Operates with `max_seq_length = 512`.
+    *   *Architecture Diagram Placeholder*
 
-![LSTM Architecture](./architecture_diagrams/lstm_architecture.png)
+Each model implements:
 
-The LSTM model consisted of:
-- An embedding layer mapping token IDs to embeddings (dim=256)
-- Two LSTM layers with hidden size of 512
-- A fully connected output layer mapping hidden states to token probabilities
-- Dropout of 0.5 between layers
+*   A `forward` method that takes token IDs as input and returns logits. For generation, it also samples the next token ID (using argmax for undergrads, temperature sampling for grads).
+*   A `prompt` method that tokenizes input text, feeds it to the model, and autoregressively generates text until `[EOS]` or `max_seq_length` is reached.
 
-LSTMs extend the RNN architecture with memory cells and gating mechanisms (input, forget, and output gates) that control information flow, allowing them to better capture long-range dependencies in text.
+### Training (`pretrainer.py`)
 
-#### Transformer
+Model training was orchestrated by the `Pretrainer` class. Key aspects include:
 
-![Transformer Architecture](./architecture_diagrams/transformer_architecture.png)
+*   **Loss Function:** `torch.nn.CrossEntropyLoss` was used, configured with `ignore_index=0` to exclude padding tokens from the loss calculation. The loss ($L$) for a sequence is calculated as:
+    $$ L = -\sum_{t=1}^{T'} \log P(y_t | y_{<t}, x) $$
+    where $T'$ is the sequence length excluding padding, $y_t$ is the target token at step $t$, and $x$ is the input sequence.
+*   **Optimizer:** `torch.optim.AdamW` was used, with learning rate (`lr`) and `weight_decay` tuned via sweeps.
+*   **Hyperparameter Optimization:** Weights & Biases (`wandb`) sweeps were employed to find optimal hyperparameters for each model architecture. Swept parameters included `lr`, `weight_decay`, `num_layers`, `dropout`, `batch_size`, `hidden_dim`, and `embedding_dim`. The sweep configurations are defined in `configs/*.yaml`.
+*   **Data Loading:** Padded sequences were prepared using `TextGenerationDataset` and loaded using `torch.utils.data.DataLoader`.
+*   **Training Loop:** Included gradient accumulation, optional Automatic Mixed Precision (`use_amp`), gradient clipping (`torch.nn.utils.clip_grad_norm_`), and logging of metrics (loss, accuracy, perplexity, timing, GPU usage) to `wandb`.
+*   **Scheduling & Early Stopping:** A `ReduceLROnPlateau` learning rate scheduler adjusted the LR based on validation loss. Early stopping with configurable `patience` prevented overfitting and terminated training when validation loss stopped improving.
 
-The Transformer model consisted of:
-- An embedding layer mapping token IDs to embeddings (dim=256)
-- Positional encoding to provide sequence order information
-- Two transformer encoder layers with:
-  - Self-attention mechanism with 2 attention heads
-  - Feed-forward network with hidden dimension of 512
-- A fully connected output layer mapping hidden states to token probabilities
-- Dropout of 0.5
+### Evaluation
 
-Transformers process the entire sequence in parallel using self-attention mechanisms, which allows them to capture long-range dependencies more effectively than RNNs or LSTMs. They also avoid the sequential nature of RNNs, enabling more efficient training.
+Model performance was evaluated using:
 
-### Training Procedure
+*   **Perplexity (PPL):** Calculated on the test set as the exponentiation of the average cross-entropy loss:
+$$ PPL = \exp\left(-\frac{1}{N}\sum_{i=1}^{N} \log P(w_i | w_{<i})\right) $$
+    Lower PPL indicates better predictive performance. *Final PPL scores are pending.*
+*   **BLEU Score:** Measures the similarity between generated text and reference text (test set completions). *Final BLEU scores and calculation method are pending.*
+*   **Generated Text:** Qualitative evaluation based on model responses to specific prompts.
 
-We trained all models using the following hyperparameters:
-- Loss function: CrossEntropyLoss
-- Optimizer: AdamW
-- Learning rate: 0.001
-- Batch size: 128
-- Maximum epochs: 30
-- Early stopping with patience of 3 epochs
-- Learning rate scheduler: ReduceLROnPlateau
+## 3. Results
 
-During training, we monitored both training and validation loss, saving the best model based on validation loss. We also implemented early stopping to prevent overfitting, and a learning rate scheduler to adjust the learning rate during training.
+Hyperparameter sweeps were conducted for each model architecture to identify optimal configurations.
 
-### Text Generation
+### Hyperparameter Sweeps
 
-For text generation, we implemented an autoregressive decoding method:
-1. Encode the prompt text into token IDs
-2. Feed the token IDs to the model to predict the next token
-3. Append the predicted token to the sequence
-4. Repeat until an end-of-sequence token is generated or the maximum length is reached
-5. Decode the generated tokens back to text
+The following dashboards visualize the parameter importance and correlation analysis from the Weights & Biases sweeps:
 
-For graduate students, we implemented temperature sampling where the logits are divided by a temperature parameter before selecting the next token, allowing control over the randomness of the generated text.
+![[rnn_sweep_dashboard.png]]
+*Sweep results for the RNN model.*
 
-### Evaluation Metrics
+![[transformer_sweep_dashboard.png]]
+*Sweep results for the Transformer model.*
 
-We evaluated the models using two primary metrics:
+![[lstm_sweep_dashboard.png]]
+*Sweep results for the LSTM model.*
 
-1. **Perplexity (PPL)**: A measure of how well the model predicts the next token in a sequence. Lower perplexity indicates better performance.
-   - PPL = exp(average cross-entropy loss)
+These sweeps guided the selection of hyperparameters for the final training runs of each model. Best configurations are saved in files like `configs/rnn_best.yaml`.
 
-2. **BLEU Score**: A measure of how similar the generated text is to reference text. Higher BLEU score indicates better performance.
-   - We generated text samples using prompts from the test set and compared them with the original text.
+I used Bayesian Hyperband via a wandb sweep agent to optimize these parameters, and I did short-spurt training runs with 1 epoch each over only a subset of the data. These aren't *necessarily* optimal at scale, but they definitely improved performance over intuitive configuration.
 
-## Results
+### RNN Model
 
-### Training and Validation Loss Curves
+*   **Loss Curve:**
+    ![[project_results/rnn/plots/rnn_loss_curve.png]]
+    *Caption: Training and validation loss curves for the best RNN model.*
 
-The following plots show the training and validation loss curves for each model:
+*   **Final Metrics:**
+    > Test Set Loss: **4.6802**
+    > Test Set Accuracy: **0.0369**
+    > Test Set Perplexity (PPL): **107.79**
+    > Test Set BLEU Score: **0.0638**
 
-![RNN Loss Curve](./plots/rnn_loss_curve.png)
+*   **Generated Text (Placeholder):**
+    > **Prompt 1:** "Which do you prefer? Dogs or cats?"
+    > *Response will be inserted here.*
+    >
+    > **Prompt 2:** "What kind of man are you?"
+    > *Response will be inserted here.*
 
-![LSTM Loss Curve](./plots/lstm_loss_curve.png)
+### LSTM Model
 
-![Transformer Loss Curve](./plots/transformer_loss_curve.png)
+*   **Loss Curve:**
+    ![[project_results/lstm/plots/lstm_loss_curve.png]]
+    *Caption: Training and validation loss curves for the best LSTM model.*
 
-### Evaluation Metrics
+*   **Final Metrics:**
+    > Test Set Loss: **4.3930**
+    > Test Set Accuracy: **0.0420**
+    > Test Set Perplexity (PPL): **80.88**
+    > Test Set BLEU Score: **0.0641**
 
-The table below shows the evaluation metrics for each model on the test dataset:
+*   **Generated Text (Placeholder):**
+    > **Prompt 1:** "Which do you prefer? Dogs or cats?"
+    > *Response will be inserted here.*
+    >
+    > **Prompt 2:** "What kind of man are you?"
+    > *Response will be inserted here.*
 
-| Model | Perplexity | BLEU Score |
-|-------|------------|------------|
-| RNN   | X.XX       | X.XX       |
-| LSTM  | X.XX       | X.XX       |
-| Transformer | X.XX  | X.XX       |
+### Transformer Model
 
-### Model Responses
+*   **Loss Curve:**
+    ![[project_results/transformer/plots/transformer_loss_curve.png]]
+    *Caption: Training and validation loss curves for the best Transformer model.*
 
-#### Standard Prompt: "Which do you prefer? Dogs or cats?"
+*   **Final Metrics:**
+    > Test Set Loss: **4.4108**
+    > Test Set Accuracy: **0.0406**
+    > Test Set Perplexity (PPL): **82.34**
+    > Test Set BLEU Score: **0.0678**
 
-**RNN Response:**
-```
-(The actual response will be filled in after training)
-```
+*   **Generated Text (Placeholder):**
+    > **Prompt 1:** "Which do you prefer? Dogs or cats?"
+    > *Response will be inserted here.*
+    >
+    > **Prompt 2:** "What kind of man are you?"
+    > *Response will be inserted here.*
 
-**LSTM Response:**
-```
-(The actual response will be filled in after training)
-```
+### Performance Summary Table
 
-**Transformer Response:**
-```
-(The actual response will be filled in after training)
-```
+| Model       | Test Loss | Test Accuracy | Test PPL | Test BLEU | Training Time (approx) | Notes                                     |
+| :---------- | :-------- | :------------ | :------- | :-------- | :--------------------- | :---------------------------------------- |
+| RNN         | 4.6802    | 0.0369        | 107.79   | 0.0638    | *TBD*                  | Tuned via sweep                           |
+| LSTM        | 4.3930    | 0.0420        | 80.88    | 0.0641    | *TBD*                  | Tuned via sweep                           |
+| Transformer | 4.4108    | 0.0406        | 82.34    | 0.0678    | *TBD*                  | Tuned via sweep, `max_seq_length` = 512 |
 
-#### Custom Prompt: "The meaning of life is"
+## 4. Code Repository Link
 
-**RNN Response:**
-```
-(The actual response will be filled in after training)
-```
+The complete source code for this project, including model implementations, training scripts, configuration files, and instructions, is available at:
 
-**LSTM Response:**
-```
-(The actual response will be filled in after training)
-```
+> https://github.com/kmccleary3301/CSC7809_LMs
 
-**Transformer Response:**
-```
-(The actual response will be filled in after training)
-```
+Please refer to the `README.md` file in the repository for detailed setup and execution instructions.
 
-## Discussion & Conclusion
+## 5. Discussion & Conclusion
 
-In this project, we implemented and compared three different sequential neural network architectures for text generation. Our results show that the Transformer model generally outperformed the RNN and LSTM models in terms of both perplexity and BLEU score, which is consistent with the literature. The ability of Transformers to process the entire sequence in parallel and capture long-range dependencies through self-attention mechanisms gives them an advantage over sequential models like RNNs and LSTMs.
+This project provided practical experience in implementing and comparing different sequence modeling architectures for text generation. The process involved setting up data processing pipelines with tokenization and padding, defining RNN, LSTM, and Transformer models in PyTorch, and managing the training process with hyperparameter sweeps, scheduling, and early stopping. Integrating Weights & Biases proved valuable for tracking experiments and optimizing hyperparameters systematically.
 
-However, this improved performance comes with a computational cost. Transformers require more memory and computation time compared to RNNs and LSTMs, especially for long sequences. LSTMs provide a good balance between performance and efficiency, making them still relevant for many applications.
+Key challenges included correctly implementing padding and ensuring the loss function ignored padded tokens, configuring the Transformer architecture with positional encoding and masking, and managing the computational resources required for training, especially for the Transformer model and extensive hyperparameter sweeps.
 
-The project demonstrated the evolution of sequential neural networks from simple RNNs to sophisticated Transformer architectures, highlighting the trade-offs between model complexity, performance, and computational requirements. Future work could explore more advanced architectures, larger models, and different applications of these text generation models. 
+*(Placeholder for final discussion based on results)*
+> The results show the LSTM achieving the lowest perplexity, suggesting it was the best model at predicting the next token on the test set. The Transformer model, while having slightly higher perplexity than the LSTM, achieved the highest BLEU score, indicating its generated text might have more n-gram overlap with the reference texts. The vanilla RNN performed worst on both metrics. These findings align with expectations: LSTM improves upon RNNs via gating, and Transformers leverage attention for potentially better sequence understanding, though perplexity and BLEU don't always perfectly align. The hyperparameter sweeps were crucial in finding reasonably performing configurations for each architecture within the limited training budget.
+
+This was pretty fun.

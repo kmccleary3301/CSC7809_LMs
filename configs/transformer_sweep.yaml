@@ -15,7 +15,7 @@ vocab_size: 10000  # This should be replaced with the actual vocabulary size
 epochs: 1
 patience: 10
 
-seq_length: 64
+max_seq_length: 64
 # batch_size: 128
 
 train_dataset:

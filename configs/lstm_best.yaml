@@ -1,0 +1,24 @@
+# LSTM model configuration
+model_type: lstm
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+
+
+
+# Model architecture
+embedding_dim: 768
+hidden_dim: 896
+num_layers: 1
+dropout: 0.2247954503529298
+
+# Training parameters
+lr: 0.0004896601564768659
+weight_decay: 0.00033235935800542485
+epochs: 30
+patience: 3
+batch_size: 16
+max_seq_length: 512
+
+# File management
+save_dir: project_results/lstm_best

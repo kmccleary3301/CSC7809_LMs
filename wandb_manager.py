@@ -69,7 +69,7 @@ class WandbTrainingManager:
                     f"layers_{self.config['num_layers']}",
                     f"d_model_{self.config['hidden_dim']}",
                     f"batch_{self.config['batch_size']}",
-                    f"seq_len_{self.config['seq_length']}",
+                    f"max_seq_len_{self.config['max_seq_length']}",
                     "token_prediction"
                 ]
             )
@@ -81,7 +81,7 @@ class WandbTrainingManager:
                 f"layers_{self.config['num_layers']}",
                 f"d_model_{self.config['hidden_dim']}",
                 f"batch_{self.config['batch_size']}",
-                f"seq_len_{self.config['seq_length']}",
+                f"max_seq_len_{self.config['max_seq_length']}",
                 "token_prediction" # Base tag for pretraining
             ]
             current_tags = list(self.run.tags or ())

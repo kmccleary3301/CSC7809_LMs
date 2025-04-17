@@ -1,16 +1,22 @@
-import os
+import os, sys
 import json
 import sentencepiece as spm
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+try:
+    file_dir = globals()['_dh'][0]
+except:
+	file_dir = os.path.dirname(__file__)
+
 def get_base_dir():
-    """Get the base directory for file paths"""
+    """Get the base directory for file paths. Always return empty string now."""
     # Check if we're running from inside final_submission directory
-    if os.path.basename(os.getcwd()) == 'final_submission':
-        return ""
-    else:
-        return "final_submission/"
+    # if os.path.basename(os.getcwd()) == 'final_submission':
+    #     return ""
+    # else:
+    #     return "final_submission/"
+    return "" # Always return empty string
 
 class TextDataset(Dataset):
     def __init__(
@@ -108,6 +114,8 @@ def tokenize_dataset(dataset, tokenizer, max_length=512):
     """Tokenize a dataset of texts and convert to PyTorch tensors"""
     tokenized_texts = []
     
+    pad_id = tokenizer.pad_id  # Get the padding token ID
+
     for text in dataset:
         token_ids = tokenizer.encode(text)
         
@@ -115,6 +123,11 @@ def tokenize_dataset(dataset, tokenizer, max_length=512):
         if len(token_ids) > max_length:
             token_ids = token_ids[:max_length]
         
+        # Pad if necessary
+        elif len(token_ids) < max_length:
+            padding_needed = max_length - len(token_ids)
+            token_ids = token_ids + [pad_id] * padding_needed
+
         # Convert to PyTorch tensor
         tokenized_texts.append(torch.tensor(token_ids, dtype=torch.long))
     

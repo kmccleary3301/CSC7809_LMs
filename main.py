@@ -2,6 +2,11 @@ import os
 import sys
 import argparse
 
+try:
+    file_dir = globals()['_dh'][0]
+except:
+	file_dir = os.path.dirname(__file__)
+
 def print_header(text):
     """Print a header with the given text"""
     print("\n" + "=" * 80)
@@ -11,10 +16,7 @@ def print_header(text):
 def get_base_dir():
     """Get the base directory for file paths"""
     # Check if we're running from inside final_submission directory
-    if os.path.basename(os.getcwd()) == 'final_submission':
-        return ""
-    else:
-        return "final_submission/"
+    return file_dir+"/"
 
 def main():
     parser = argparse.ArgumentParser(description='Run the sequential neural networks project')

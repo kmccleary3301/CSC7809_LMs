@@ -1,0 +1,36 @@
+# Transformer model configuration
+model_type: transformer
+vocab_size: 10000  # This should be replaced with the actual vocabulary size
+checkpoint_path: "models"
+
+# Model architecture
+# These parameters are optimal for test loss.
+# They were revealed to me in a dream (wandb hyperparam sweep)
+embedding_dim: 384
+hidden_dim: 1024
+num_layers: 3
+num_heads: 2
+dropout: 0.0712304862505903
+
+lr: 0.00047080503593600263
+max_seq_length: 64
+weight_decay: 0.0004192654765963758
+epochs: 30
+patience: 3
+
+batch_size: 16
+max_seq_length: 512
+
+
+train_dataset:
+  max_samples: 39592 # Total set is 39592
+
+val_dataset:
+  max_samples: 9899 # Total set is 9899
+
+moving_average_window_size: 1
+
+device: "cuda:1"
+
+# File management
+save_dir: project_results/transformer_best

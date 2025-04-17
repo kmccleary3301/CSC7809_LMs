@@ -6,7 +6,7 @@ checkpoint_path: "models"
 epochs: 1
 patience: 10
 
-seq_length: 512
+max_seq_length: 64
 # batch_size: 128
 
 train_dataset:
